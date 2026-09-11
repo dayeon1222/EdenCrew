@@ -1,5 +1,11 @@
-import 'dart:async'; 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../data/api/search_api.dart';
+import '../../data/dto/search_dto.dart';
+import '../../providers/watchlist_provider.dart';
 import '../../theme/theme.dart';
 import '../../widgets/custom_toast.dart';
 
@@ -11,122 +17,181 @@ class SearchScreen extends StatefulWidget {
 }
 
 class _SearchScreenState extends State<SearchScreen> {
-  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController =
+      TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final SearchApi _searchApi = SearchApi();
 
-  // 디바운스 및 로딩 상태 추가
   Timer? _debounce;
+
   bool _isLoading = false;
 
-  // 검색어 상태
   String _query = '';
 
-  // 임시 데이터 (실제 프로젝트에서는 Provider / ViewModel로 관리)
-  final List<Map<String, dynamic>> _mockStocks = [
-    {'name': '삼성전자', 'symbol': '005930', 'exchange': '코스피', 'isFavorite': true},
-    {'name': '삼성전자우', 'symbol': '005935', 'exchange': '코스피', 'isFavorite': false},
-    {'name': '삼성바이오로직스', 'symbol': '207940', 'exchange': '코스피', 'isFavorite': false},
-    {'name': '삼성에스디에스', 'symbol': '018260', 'exchange': '코스피', 'isFavorite': false},
-    {'name': '삼성중공업', 'symbol': '010140', 'exchange': '코스피', 'isFavorite': false},
-    {'name': '삼성물산', 'symbol': '028260', 'exchange': '코스피', 'isFavorite': false},
-    {'name': 'SK하이닉스', 'symbol': '000660', 'exchange': '코스피', 'isFavorite': false},
-    {'name': '카카오', 'symbol': '035720', 'exchange': '코스피', 'isFavorite': false},
-  ];
+  List<Map<String, dynamic>> _searchResults = [];
 
   @override
   void initState() {
     super.initState();
-    // 디바운스 처리(300ms) 적용
     _searchController.addListener(_onSearchChanged);
   }
 
   void _onSearchChanged() {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    if (_debounce?.isActive ?? false) {
+      _debounce!.cancel();
+    }
 
     final text = _searchController.text.trim();
 
     if (text.isEmpty) {
       setState(() {
         _query = '';
+        _searchResults = [];
         _isLoading = false;
       });
       return;
     }
 
     setState(() {
+      _query = text;
       _isLoading = true;
     });
 
-    _debounce = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        setState(() {
-          _query = text;
-          _isLoading = false;
-        });
+    _debounce = Timer(
+      const Duration(milliseconds: 300),
+      () {
+        if (mounted) {
+          _searchStocks(text);
+        }
+      },
+    );
+  }
+
+  Future<void> _searchStocks(String query) async {
+    try {
+      final json = await _searchApi.searchStocks(query);
+
+      final response = SearchResponseDto.fromJson(json);
+
+      final results = _convertSearchResults(response);
+
+      if (!mounted) {
+        return;
       }
-    });
+
+      setState(() {
+        _searchResults = results;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('종목 검색 실패: $e');
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _searchResults = [];
+        _isLoading = false;
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _convertSearchResults(
+    SearchResponseDto response,
+  ) {
+    return response.items
+        .where(
+          (item) => RegExp(r'^\d{6}$').hasMatch(item.code),
+        )
+        .map(
+          (item) => {
+            'name': item.name,
+            'symbol': item.code,
+            'exchange': item.typeName,
+          },
+        )
+        .toList();
   }
 
   @override
   void dispose() {
-    _debounce?.cancel(); // Timer 해제
+    _debounce?.cancel();
     _searchController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  // 관심 등록 토글 및 토스트 메시지 함수
   void _toggleFavorite(Map<String, dynamic> stock) {
-    final isFavorite = stock['isFavorite'] as bool;
+    final provider = context.read<WatchlistProvider>();
 
-    setState(() {
-      stock['isFavorite'] = !isFavorite;
-    });
+    final name = stock['name'] as String;
+    final symbol = stock['symbol'] as String;
+    final exchange = stock['exchange'] as String;
 
-    final newStatus = stock['isFavorite'] as bool;
-
-    CustomToast.show(
-      context,
-      message: newStatus ? '관심이 등록되었습니다' : '관심이 해제되었습니다',
-      icon: newStatus ? Icons.star : Icons.star_border,
-      iconColor: newStatus
-          ? context.colors.favoriteActive
-          : (context.colors.favoriteInactive ?? context.colors.textSecondary),
+    final isFavorite = provider.watchlist.any(
+      (item) => item.symbol == symbol,
     );
+
+    if (isFavorite) {
+      provider.removeFromWatchlist(symbol);
+
+      CustomToast.show(
+        context,
+        message: '관심이 해제되었습니다',
+        icon: Icons.star_border,
+        iconColor: context.colors.favoriteInactive,
+      );
+    } else {
+      provider.addToWatchlist(
+        WatchlistItem(
+          symbol: symbol,
+          name: name,
+          exchange: exchange,
+          currentPrice: 0,
+          priceChange: 0,
+          priceChangeRate: 0,
+          isLoading: true,
+        ),
+      );
+
+      CustomToast.show(
+        context,
+        message: '관심이 등록되었습니다',
+        icon: Icons.star,
+        iconColor: context.colors.favoriteActive,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // 검색 결과 필터링
-    final filteredResults = _query.isEmpty
-        ? <Map<String, dynamic>>[]
-        : _mockStocks.where((stock) {
-            final name = stock['name'] as String;
-            final symbol = stock['symbol'] as String;
-            return name.contains(_query) || symbol.contains(_query);
-          }).toList();
+    final provider = context.watch<WatchlistProvider>();
 
     return Scaffold(
       backgroundColor: context.colors.surfaceBase,
       body: SafeArea(
         child: Column(
           children: [
-            // 1. Search Bar Area
             Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: context.dimens.space4,
-                vertical: context.dimens.space2 ?? 8,
+                vertical: context.dimens.space2,
               ),
               child: _buildSearchBar(context),
             ),
-            
-            // 2. Body Section (Initial / Results / No Results)
             Expanded(
               child: _query.isEmpty
                   ? _buildInitialState(context)
-                  : filteredResults.isNotEmpty
-                      ? _buildSearchResults(context, filteredResults)
-                      : _buildNoResultsState(context),
+                  : _isLoading
+                      ? _buildLoadingState(context)
+                      : _searchResults.isNotEmpty
+                          ? _buildSearchResults(
+                              context,
+                              _searchResults,
+                              provider,
+                            )
+                          : _buildNoResultsState(context),
             ),
           ],
         ),
@@ -134,16 +199,17 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 상단 검색 바
   Widget _buildSearchBar(BuildContext context) {
     return Container(
       height: 48,
       decoration: BoxDecoration(
         color: context.colors.surfaceRaised,
-        borderRadius: BorderRadius.circular(context.dimens.radiusMd ?? 8),
+        borderRadius: BorderRadius.circular(
+          context.dimens.radiusMd,
+        ),
       ),
       padding: EdgeInsets.symmetric(
-        horizontal: context.dimens.space3 ?? 12,
+        horizontal: context.dimens.space3,
       ),
       child: Row(
         children: [
@@ -152,7 +218,7 @@ class _SearchScreenState extends State<SearchScreen> {
             color: context.colors.textSecondary,
             size: 20,
           ),
-          SizedBox(width: context.dimens.space2 ?? 8),
+          SizedBox(width: context.dimens.space2),
           Expanded(
             child: TextField(
               controller: _searchController,
@@ -174,7 +240,6 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
           ),
-          // 입력 중 로딩 상태 및 지우기 버튼 추가
           if (_isLoading)
             SizedBox(
               width: 16,
@@ -200,7 +265,6 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 초기 검색 대기 상태 (종목을 검색해 보세요)
   Widget _buildInitialState(BuildContext context) {
     return Center(
       child: Column(
@@ -220,7 +284,7 @@ class _SearchScreenState extends State<SearchScreen> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          SizedBox(height: context.dimens.space2 ?? 8),
+          SizedBox(height: context.dimens.space2),
           Text(
             '종목명 또는 종목코드 6자리로\n검색하실 수 있습니다.',
             textAlign: TextAlign.center,
@@ -235,28 +299,40 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 검색 결과 목록
+  Widget _buildLoadingState(BuildContext context) {
+    return Center(
+      child: CircularProgressIndicator(
+        color: context.colors.textSecondary,
+      ),
+    );
+  }
+
   Widget _buildSearchResults(
     BuildContext context,
     List<Map<String, dynamic>> results,
+    WatchlistProvider provider,
   ) {
     return ListView.separated(
       itemCount: results.length,
-      separatorBuilder: (_, __) => Divider(
-        color: context.colors.borderSubtle ?? context.colors.surfaceRaised,
+      separatorBuilder: (_, _) => Divider(
+        color: context.colors.borderSubtle,
         height: 1,
       ),
       itemBuilder: (context, index) {
         final stock = results[index];
+
         final name = stock['name'] as String;
         final symbol = stock['symbol'] as String;
         final exchange = stock['exchange'] as String;
-        final isFavorite = stock['isFavorite'] as bool;
+
+        final isFavorite = provider.watchlist.any(
+          (item) => item.symbol == symbol,
+        );
 
         return ListTile(
           contentPadding: EdgeInsets.symmetric(
             horizontal: context.dimens.space4,
-            vertical: context.dimens.space1 ?? 4,
+            vertical: context.dimens.space1,
           ),
           title: _buildHighlightedText(
             context,
@@ -271,13 +347,13 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
           trailing: GestureDetector(
-            onTap: () => _toggleFavorite(stock), // 토스트 및 상태 전환 함수 연결
+            onTap: () => _toggleFavorite(stock),
             child: Icon(
               isFavorite ? Icons.star : Icons.star_border,
-              // 관심종목 활성화 시 강조 컬러(또는 노란색 계열), 비활성화 시 textSecondary
               color: isFavorite
-                ? context.colors.favoriteActive
-                : (context.colors.favoriteInactive ?? context.colors.textSecondary),
+                  ? context.colors.favoriteActive
+                  : context.colors.favoriteInactive,
+              size: 22,
             ),
           ),
           onTap: () {
@@ -288,34 +364,34 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 검색 결과 없음 상태
   Widget _buildNoResultsState(BuildContext context) {
     return Center(
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: context.dimens.space6 ?? 24),
+        padding: EdgeInsets.symmetric(
+          horizontal: context.dimens.space6,
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // X 표시가 겹쳐진 돋보기 아이콘 스타일
             Stack(
               alignment: Alignment.center,
               children: [
                 Icon(
-                  Icons.search,
-                  size: 56,
-                  color: context.colors.textDisabled,
+                    Icons.search,
+                    size: 56,
+                    color: context.colors.textDisabled,
                 ),
                 Positioned(
-                  bottom: 12,
-                  right: 12,
-                  child: Icon(
-                    Icons.close,
-                    size: 20,
-                    color: context.colors.textDisabled,
-                  ),
+                        right: 25,
+                        bottom: 24,
+                        child: Icon(
+                            Icons.close,
+                            size: 18,
+                            color: context.colors.textDisabled,
+                            ),
+                        ),
+                    ],
                 ),
-              ],
-            ),
             SizedBox(height: context.dimens.space4),
             Text(
               '검색 결과가 없습니다',
@@ -325,8 +401,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            SizedBox(height: context.dimens.space2 ?? 8),
-            // 긴 검색어 오버플로우 방지 처리
+            SizedBox(height: context.dimens.space2),
             Text(
               '\'$_query\'와\n일치하는 검색 결과를 찾지 못했습니다.',
               textAlign: TextAlign.center,
@@ -344,7 +419,6 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 검색어 일치 영역 하이라이팅 처리 (예: '삼성' 강조)
   Widget _buildHighlightedText(
     BuildContext context, {
     required String text,
@@ -368,8 +442,6 @@ class _SearchScreenState extends State<SearchScreen> {
     final match = text.substring(startIndex, endIndex);
     final afterMatch = text.substring(endIndex);
 
-    final highlightColor = context.colors.searchHighlight;
-
     return RichText(
       text: TextSpan(
         style: TextStyle(
@@ -379,12 +451,16 @@ class _SearchScreenState extends State<SearchScreen> {
           fontFamily: 'NotoSansKR',
         ),
         children: [
-          if (beforeMatch.isNotEmpty) TextSpan(text: beforeMatch),
+          if (beforeMatch.isNotEmpty)
+            TextSpan(text: beforeMatch),
           TextSpan(
             text: match,
-            style: TextStyle(color: highlightColor),
+            style: TextStyle(
+              color: context.colors.searchHighlight,
+            ),
           ),
-          if (afterMatch.isNotEmpty) TextSpan(text: afterMatch),
+          if (afterMatch.isNotEmpty)
+            TextSpan(text: afterMatch),
         ],
       ),
     );

@@ -29,10 +29,15 @@ class WatchlistScreen extends StatelessWidget {
           GestureDetector(
             onTap: () {
               showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                builder: (_) => const SortBottomSheet(),
-              );
+                                    context: context,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (_) {
+                                      return ChangeNotifierProvider.value(
+                                        value: context.read<WatchlistProvider>(),
+                                        child: const SortBottomSheet(),
+                                      );
+                                    },
+                                  );
             },
             child: Row(
               children: [
@@ -43,7 +48,7 @@ class WatchlistScreen extends StatelessWidget {
                     fontSize: 14,
                   ),
                 ),
-                SizedBox(width: context.dimens.space1 ?? 2),
+                SizedBox(width: context.dimens.space1),
                 Icon(
                   Icons.arrow_drop_down,
                   color: context.colors.textSecondary,
@@ -52,7 +57,7 @@ class WatchlistScreen extends StatelessWidget {
               ],
             ),
           ),
-          SizedBox(width: context.dimens.space3 ?? 12),
+          SizedBox(width: context.dimens.space3),
           // 새로고침 버튼
           IconButton(
             icon: Icon(
@@ -62,7 +67,7 @@ class WatchlistScreen extends StatelessWidget {
             ),
             onPressed: () => provider.loadWatchlist(),
           ),
-          SizedBox(width: context.dimens.space2 ?? 8),
+          SizedBox(width: context.dimens.space2),
         ],
       ),
       body: provider.watchlist.isEmpty && !provider.isLoading
@@ -91,7 +96,7 @@ class WatchlistScreen extends StatelessWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
-          SizedBox(height: context.dimens.space2 ?? 8),
+          SizedBox(height: context.dimens.space2),
           Text(
             '검색 탭에서 종목을 찾아\n별 아이콘을 눌러 추가해 주세요.',
             textAlign: TextAlign.center,
@@ -109,9 +114,9 @@ class WatchlistScreen extends StatelessWidget {
   /// 종목 리스트
   Widget _buildStockList(BuildContext context, WatchlistProvider provider) {
     return ListView.separated(
-      padding: EdgeInsets.symmetric(vertical: context.dimens.space2 ?? 8),
+      padding: EdgeInsets.symmetric(vertical: context.dimens.space2),
       itemCount: provider.sortedWatchlist.length,
-      separatorBuilder: (_, __) => Divider(
+      separatorBuilder: (_, _) => Divider(
       color: context.colors.borderSubtle,
       height: 1,
     ),
@@ -154,12 +159,12 @@ class WatchlistScreen extends StatelessWidget {
     final isUp = item.priceChange > 0;
     final isDown = item.priceChange < 0;
 
-    // 시맨틱 토큰 적용 (상승: priceUp / 하락: priceDown / 보합: textSecondary)
+    // 시맨틱 토큰 적용
     final priceColor = isUp
         ? context.colors.priceUpText
         : isDown
             ? context.colors.priceDownText
-            : context.colors.textSecondary;
+            : context.colors.priceFlatText;
 
     final priceStr = item.currentPrice.toString().replaceAllMapped(
           RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
@@ -181,7 +186,7 @@ class WatchlistScreen extends StatelessWidget {
             fontSize: 16,
           ),
         ),
-        SizedBox(height: context.dimens.space1 ?? 2),
+        SizedBox(height: context.dimens.space1),
         Text(
           changeText,
           style: TextStyle(
@@ -208,16 +213,16 @@ class WatchlistScreen extends StatelessWidget {
           height: 16,
           decoration: BoxDecoration(
             color: skeletonColor,
-            borderRadius: BorderRadius.circular(context.dimens.radiusSm ?? 4),
+            borderRadius: BorderRadius.circular(context.dimens.radiusSm),
           ),
         ),
-        SizedBox(height: context.dimens.space1 ?? 6),
+        SizedBox(height: context.dimens.space1),
         Container(
           width: 40,
           height: 12,
           decoration: BoxDecoration(
             color: skeletonColor,
-            borderRadius: BorderRadius.circular(context.dimens.radiusSm ?? 4),
+            borderRadius: BorderRadius.circular(context.dimens.radiusSm),
           ),
         ),
       ],
