@@ -56,6 +56,9 @@ class _StockCandleChartState extends State<StockCandleChart> {
           selectedIndex: _selectedIndex,
           upColor: context.colors.chartLineUp,
           downColor: context.colors.chartLineDown,
+          areaUpColor: context.colors.chartAreaUp,
+          areaDownColor: context.colors.chartAreaDown,
+          volumeColor: context.colors.chartVolumeBar,
           axisColor: context.colors.chartAxisLabel,
           tooltipBg: context.colors.surfaceRaised,
           textColor: context.colors.textPrimary,
@@ -69,13 +72,11 @@ class _StockCandleChartState extends State<StockCandleChart> {
 
     if (width == 0) return;
 
-    // 오른쪽 가격 라벨 영역을 제외한 실제 차트 영역
     const rightLabelWidth = 52.0;
     final chartWidth = width - rightLabelWidth;
 
     if (chartWidth <= 0) return;
 
-    // 가격 라벨 영역을 터치한 경우 무시
     if (localPosition.dx >= chartWidth) return;
 
     final count = widget.candles.length;
@@ -94,8 +95,15 @@ class _StockCandleChartState extends State<StockCandleChart> {
 class _CandleChartPainter extends CustomPainter {
   final List<CandleData> candles;
   final int? selectedIndex;
+
   final Color upColor;
   final Color downColor;
+
+  final Color areaUpColor;
+  final Color areaDownColor;
+
+  final Color volumeColor;
+
   final Color axisColor;
   final Color tooltipBg;
   final Color textColor;
@@ -105,6 +113,9 @@ class _CandleChartPainter extends CustomPainter {
     required this.selectedIndex,
     required this.upColor,
     required this.downColor,
+    required this.areaUpColor,
+    required this.areaDownColor,
+    required this.volumeColor,
     required this.axisColor,
     required this.tooltipBg,
     required this.textColor,
@@ -114,16 +125,29 @@ class _CandleChartPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (candles.isEmpty) return;
 
-    // 오른쪽 가격 축 영역
+    // ------------------------------------------
+    // 기본 영역
+    // ------------------------------------------
+
     const rightLabelWidth = 52.0;
 
-    // 실제 캔들이 그려지는 영역
     final chartWidth = size.width - rightLabelWidth;
 
     if (chartWidth <= 0) return;
 
+    // 가격 차트 영역
+    const volumeHeight = 42.0;
+    const volumeGap = 8.0;
+
+    final priceHeight =
+        size.height - volumeHeight - volumeGap;
+
+    if (priceHeight <= 0) return;
+
     double minPrice = candles.first.low;
     double maxPrice = candles.first.high;
+
+    double maxVolume = candles.first.volume;
 
     for (final candle in candles) {
       if (candle.low < minPrice) {
@@ -132,6 +156,10 @@ class _CandleChartPainter extends CustomPainter {
 
       if (candle.high > maxPrice) {
         maxPrice = candle.high;
+      }
+
+      if (candle.volume > maxVolume) {
+        maxVolume = candle.volume;
       }
     }
 
@@ -142,10 +170,12 @@ class _CandleChartPainter extends CustomPainter {
 
     final count = candles.length;
 
-    final candleWidth = chartWidth / count;
+    final candleWidth =
+        chartWidth / count;
 
     final bodyWidth =
-        (candleWidth * 0.65).clamp(2.0, 14.0);
+        (candleWidth * 0.65)
+            .clamp(2.0, 14.0);
 
     // ------------------------------------------
     // 가격 축 가이드라인
@@ -162,7 +192,7 @@ class _CandleChartPainter extends CustomPainter {
           i / (labelCount - 1);
 
       final y =
-          size.height * ratio;
+          priceHeight * ratio;
 
       canvas.drawLine(
         Offset(0, y),
@@ -172,13 +202,69 @@ class _CandleChartPainter extends CustomPainter {
     }
 
     // ------------------------------------------
+    // 차트 영역 채우기
+    // ------------------------------------------
+
+    final areaPath = Path();
+
+    for (int i = 0; i < count; i++) {
+      final candle = candles[i];
+
+      final x =
+          (i * candleWidth) +
+          (candleWidth / 2);
+
+      final closeY =
+          priceHeight -
+          ((candle.close - minPrice) /
+                  priceRange *
+              priceHeight);
+
+      if (i == 0) {
+        areaPath.moveTo(x, closeY);
+      } else {
+        areaPath.lineTo(x, closeY);
+      }
+    }
+
+    // 아래쪽 기준선까지 영역 확장
+    areaPath.lineTo(
+      chartWidth,
+      priceHeight,
+    );
+
+    areaPath.lineTo(
+      0,
+      priceHeight,
+    );
+
+    areaPath.close();
+
+    final latestCandle = candles.last;
+
+    final areaColor =
+        latestCandle.close >= latestCandle.open
+            ? areaUpColor
+            : areaDownColor;
+
+    final areaPaint = Paint()
+      ..color = areaColor.withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawPath(
+      areaPath,
+      areaPaint,
+    );
+
+    // ------------------------------------------
     // 캔들 렌더링
     // ------------------------------------------
 
     for (int i = 0; i < count; i++) {
       final candle = candles[i];
 
-      final isUp = candle.close >= candle.open;
+      final isUp =
+          candle.close >= candle.open;
 
       final color =
           isUp ? upColor : downColor;
@@ -188,28 +274,28 @@ class _CandleChartPainter extends CustomPainter {
           (candleWidth / 2);
 
       final highY =
-          size.height -
+          priceHeight -
           ((candle.high - minPrice) /
                   priceRange *
-              size.height);
+              priceHeight);
 
       final lowY =
-          size.height -
+          priceHeight -
           ((candle.low - minPrice) /
                   priceRange *
-              size.height);
+              priceHeight);
 
       final openY =
-          size.height -
+          priceHeight -
           ((candle.open - minPrice) /
                   priceRange *
-              size.height);
+              priceHeight);
 
       final closeY =
-          size.height -
+          priceHeight -
           ((candle.close - minPrice) /
                   priceRange *
-              size.height);
+              priceHeight);
 
       // High-Low 꼬리선
       final linePaint = Paint()
@@ -232,7 +318,7 @@ class _CandleChartPainter extends CustomPainter {
       final bodyHeight =
           (bottomY - topY)
               .abs()
-              .clamp(1.5, size.height);
+              .clamp(1.5, priceHeight);
 
       final bodyPaint = Paint()
         ..color = color
@@ -252,6 +338,49 @@ class _CandleChartPainter extends CustomPainter {
     }
 
     // ------------------------------------------
+    // 거래량 막대
+    // ------------------------------------------
+
+    final volumeTop =
+        priceHeight + volumeGap;
+
+    final volumePaint = Paint()
+      ..color = volumeColor
+      ..style = PaintingStyle.fill;
+
+    for (int i = 0; i < count; i++) {
+      final candle = candles[i];
+
+      final volumeRatio =
+          maxVolume == 0
+              ? 0.0
+              : candle.volume / maxVolume;
+
+      final barHeight =
+          volumeRatio * volumeHeight;
+
+      final x =
+          (i * candleWidth) +
+          (candleWidth / 2);
+
+      final barWidth =
+          (candleWidth * 0.55)
+              .clamp(1.0, 8.0);
+
+      canvas.drawRect(
+        Rect.fromLTWH(
+          x - barWidth / 2,
+          volumeTop +
+              volumeHeight -
+              barHeight,
+          barWidth,
+          barHeight,
+        ),
+        volumePaint,
+      );
+    }
+
+    // ------------------------------------------
     // 가격 축 숫자 라벨
     // ------------------------------------------
 
@@ -261,6 +390,7 @@ class _CandleChartPainter extends CustomPainter {
       chartWidth,
       minPrice,
       maxPrice,
+      priceHeight,
     );
 
     // ------------------------------------------
@@ -271,17 +401,18 @@ class _CandleChartPainter extends CustomPainter {
         selectedIndex! < candles.length) {
       final index = selectedIndex!;
 
-      final candle = candles[index];
+      final candle =
+          candles[index];
 
       final x =
           (index * candleWidth) +
           (candleWidth / 2);
 
       final closeY =
-          size.height -
+          priceHeight -
           ((candle.close - minPrice) /
                   priceRange *
-              size.height);
+              priceHeight);
 
       // Crosshair
       final crosshairPaint = Paint()
@@ -291,7 +422,7 @@ class _CandleChartPainter extends CustomPainter {
 
       canvas.drawLine(
         Offset(x, 0),
-        Offset(x, size.height),
+        Offset(x, priceHeight),
         crosshairPaint,
       );
 
@@ -314,6 +445,7 @@ class _CandleChartPainter extends CustomPainter {
         size,
         Offset(x, closeY),
         candle,
+        chartWidth,
       );
     }
   }
@@ -328,6 +460,7 @@ class _CandleChartPainter extends CustomPainter {
     double chartWidth,
     double minPrice,
     double maxPrice,
+    double priceHeight,
   ) {
     const rightLabelWidth = 52.0;
     const labelCount = 4;
@@ -336,17 +469,18 @@ class _CandleChartPainter extends CustomPainter {
       final ratio =
           i / (labelCount - 1);
 
-      // 위에서 아래로 가격이 낮아짐
       final price =
           maxPrice -
           ((maxPrice - minPrice) * ratio);
 
       final y =
-          size.height * ratio;
+          priceHeight * ratio;
 
-      final text = _formatPrice(price);
+      final text =
+          _formatPrice(price);
 
-      final textPainter = TextPainter(
+      final textPainter =
+          TextPainter(
         text: TextSpan(
           text: text,
           style: TextStyle(
@@ -355,23 +489,23 @@ class _CandleChartPainter extends CustomPainter {
             fontWeight: FontWeight.w400,
           ),
         ),
-        textDirection: TextDirection.ltr,
+        textDirection:
+            TextDirection.ltr,
       );
 
       textPainter.layout(
         maxWidth: 48,
       );
 
-      // 숫자가 차트 오른쪽 영역에 들어가도록 배치
       final x =
           chartWidth +
           (rightLabelWidth -
-              textPainter.width) /
+                  textPainter.width) /
               2;
 
-      // 텍스트 중앙 정렬
       final textY =
-          y - textPainter.height / 2;
+          y -
+          textPainter.height / 2;
 
       textPainter.paint(
         canvas,
@@ -379,9 +513,9 @@ class _CandleChartPainter extends CustomPainter {
           x,
           textY.clamp(
             0.0,
-            size.height -
+            priceHeight -
                 textPainter.height,
-          ),
+          ).toDouble(),
         ),
       );
     }
@@ -408,7 +542,8 @@ class _CandleChartPainter extends CustomPainter {
           RegExp(
             r'(\d{1,3})(?=(\d{3})+(?!\d))',
           ),
-          (match) => '${match[1]},',
+          (match) =>
+              '${match[1]},',
         );
   }
 
@@ -421,6 +556,7 @@ class _CandleChartPainter extends CustomPainter {
     Size size,
     Offset point,
     CandleData candle,
+    double chartWidth,
   ) {
     final textSpan = TextSpan(
       text:
@@ -433,9 +569,11 @@ class _CandleChartPainter extends CustomPainter {
       ),
     );
 
-    final textPainter = TextPainter(
+    final textPainter =
+        TextPainter(
       text: textSpan,
-      textDirection: TextDirection.ltr,
+      textDirection:
+          TextDirection.ltr,
     );
 
     textPainter.layout();
@@ -459,9 +597,9 @@ class _CandleChartPainter extends CustomPainter {
     }
 
     if (tooltipX + tooltipWidth >
-        size.width) {
+        chartWidth) {
       tooltipX =
-          size.width -
+          chartWidth -
           tooltipWidth -
           4;
     }
@@ -478,12 +616,14 @@ class _CandleChartPainter extends CustomPainter {
 
     final bgPaint = Paint()
       ..color = tooltipBg
-      ..style = PaintingStyle.fill;
+      ..style =
+          PaintingStyle.fill;
 
     final borderPaint = Paint()
       ..color =
           axisColor.withValues(alpha: 0.3)
-      ..style = PaintingStyle.stroke
+      ..style =
+          PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
     final rect =
