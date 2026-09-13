@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/api/realtime_api.dart';
 import '../data/dto/realtime_dto.dart';
@@ -57,9 +60,32 @@ class WatchlistItem {
       isLoading: isLoading ?? this.isLoading,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'symbol': symbol,
+      'name': name,
+      'exchange': exchange,
+    };
+  }
+
+  factory WatchlistItem.fromJson(Map<String, dynamic> json) {
+    return WatchlistItem(
+      symbol: json['symbol'] as String,
+      name: json['name'] as String,
+      exchange: json['exchange'] as String,
+      currentPrice: 0,
+      priceChange: 0,
+      priceChangeRate: 0,
+      isLoading: true,
+    );
+  }
 }
 
 class WatchlistProvider extends ChangeNotifier {
+  static const String _watchlistKey = 'watchlist';
+  static const String _sortKey = 'watchlist_sort';
+
   final RealtimeApi _realtimeApi = RealtimeApi();
 
   List<WatchlistItem> watchlist = [];
@@ -68,20 +94,42 @@ class WatchlistProvider extends ChangeNotifier {
 
   bool isLoading = false;
 
+  WatchlistProvider() {
+    _restore();
+  }
+
   List<WatchlistItem> get sortedWatchlist {
     final items = [...watchlist];
 
     switch (currentSort) {
       case SortType.price:
-        items.sort(
-          (a, b) => b.currentPrice.compareTo(a.currentPrice),
-        );
+        items.sort((a, b) {
+          if (a.isLoading && !b.isLoading) {
+            return 1;
+          }
+
+          if (!a.isLoading && b.isLoading) {
+            return -1;
+          }
+
+          return b.currentPrice.compareTo(a.currentPrice);
+        });
         break;
 
       case SortType.changeRate:
-        items.sort(
-          (a, b) => b.priceChangeRate.compareTo(a.priceChangeRate),
-        );
+        items.sort((a, b) {
+          if (a.isLoading && !b.isLoading) {
+            return 1;
+          }
+
+          if (!a.isLoading && b.isLoading) {
+            return -1;
+          }
+
+          return b.priceChangeRate.compareTo(
+            a.priceChangeRate,
+          );
+        });
         break;
 
       case SortType.name:
@@ -94,9 +142,84 @@ class WatchlistProvider extends ChangeNotifier {
     return items;
   }
 
+  Future<void> _restore() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 저장된 정렬 기준 복원
+      final savedSort = prefs.getString(_sortKey);
+
+      if (savedSort != null) {
+        currentSort = SortType.values.firstWhere(
+          (type) => type.name == savedSort,
+          orElse: () => SortType.price,
+        );
+      }
+
+      // 저장된 관심종목 복원
+      final savedWatchlist = prefs.getStringList(
+        _watchlistKey,
+      );
+
+      if (savedWatchlist != null) {
+        watchlist = savedWatchlist
+            .map(
+              (item) => WatchlistItem.fromJson(
+                jsonDecode(item) as Map<String, dynamic>,
+              ),
+            )
+            .toList();
+      }
+
+      notifyListeners();
+
+      // 복원된 종목의 최신 시세 조회
+      if (watchlist.isNotEmpty) {
+        await loadWatchlist();
+      }
+    } catch (e) {
+      debugPrint('관심종목 복원 실패: $e');
+    }
+  }
+
+  Future<void> _saveWatchlist() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final data = watchlist
+          .map(
+            (item) => jsonEncode(item.toJson()),
+          )
+          .toList();
+
+      await prefs.setStringList(
+        _watchlistKey,
+        data,
+      );
+    } catch (e) {
+      debugPrint('관심종목 저장 실패: $e');
+    }
+  }
+
+  Future<void> _saveSortType() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.setString(
+        _sortKey,
+        currentSort.name,
+      );
+    } catch (e) {
+      debugPrint('정렬 기준 저장 실패: $e');
+    }
+  }
+
   void setSortType(SortType type) {
     currentSort = type;
+
     notifyListeners();
+
+    _saveSortType();
   }
 
   void addToWatchlist(WatchlistItem item) {
@@ -109,8 +232,13 @@ class WatchlistProvider extends ChangeNotifier {
     }
 
     watchlist.add(item);
+
     notifyListeners();
 
+    // 관심종목 저장
+    _saveWatchlist();
+
+    // 추가한 종목의 실시간 시세 조회
     _loadRealtimePrice(item.symbol);
   }
 
@@ -120,6 +248,9 @@ class WatchlistProvider extends ChangeNotifier {
     );
 
     notifyListeners();
+
+    // 관심종목 저장
+    _saveWatchlist();
   }
 
   Future<void> _loadRealtimePrice(String symbol) async {
@@ -140,12 +271,15 @@ class WatchlistProvider extends ChangeNotifier {
       );
 
       final priceChange =
-          realtimeItem.currentPrice - realtimeItem.previousClosePrice;
+          realtimeItem.currentPrice -
+          realtimeItem.previousClosePrice;
 
       final priceChangeRate =
           realtimeItem.previousClosePrice == 0
               ? 0.0
-              : (priceChange / realtimeItem.previousClosePrice) * 100;
+              : (priceChange /
+                      realtimeItem.previousClosePrice) *
+                  100;
 
       final index = watchlist.indexWhere(
         (item) => item.symbol == symbol,
@@ -164,7 +298,9 @@ class WatchlistProvider extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      debugPrint('실시간 시세 조회 실패: $symbol / $e');
+      debugPrint(
+        '실시간 시세 조회 실패: $symbol / $e',
+      );
     }
   }
 
@@ -229,7 +365,9 @@ class WatchlistProvider extends ChangeNotifier {
         );
       }).toList();
     } catch (e) {
-      debugPrint('관심 종목 시세 조회 실패: $e');
+      debugPrint(
+        '관심 종목 시세 조회 실패: $e',
+      );
 
       watchlist = watchlist
           .map(
@@ -244,3 +382,4 @@ class WatchlistProvider extends ChangeNotifier {
     }
   }
 }
+

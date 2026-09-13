@@ -72,5 +72,7 @@ int _parseLastPage(dynamic document) {
 }
 
 int _parseNumber(String value) {
-  return int.parse(value.replaceAll(',', '').trim());
+  return int.parse(
+    value.replaceAll(',', '').trim(),
+  );
 }

@@ -8,6 +8,7 @@ import '../../data/dto/search_dto.dart';
 import '../../providers/watchlist_provider.dart';
 import '../../theme/theme.dart';
 import '../../widgets/custom_toast.dart';
+import '../detail/stock_detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -357,7 +358,19 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
           onTap: () {
-            // 종목 상세 화면 이동 처리
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ChangeNotifierProvider.value(
+                  value: context.read<WatchlistProvider>(),
+                  child: StockDetailScreen(
+                    stockName: name,
+                    stockCode: symbol,
+                    exchange: exchange,
+                  ),
+                ),
+              ),
+            );
           },
         );
       },
